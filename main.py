@@ -463,8 +463,12 @@ async def main() -> None:
 
     def shutdown_handler():
         logger.info("종료 신호 수신. 안전하게 종료 중...")
+        # pipeline.stop()은 _running 플래그만 내리고, 실제 종료는 run() 내부의
+        # 캡처 루프가 다음 반복에서 이를 감지하고 빠져나오며 완료된다.
+        # loop.stop()을 여기서 동기 호출하면 run() 코루틴이 아직 완전히
+        # unwind되지 않은 상태에서 루프가 멈춰 "Event loop stopped before
+        # Future completed" RuntimeError가 발생하므로 호출하지 않는다.
         pipeline.stop()
-        loop.stop()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, shutdown_handler)
