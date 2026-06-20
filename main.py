@@ -153,6 +153,10 @@ class FallGuardianPipeline:
             max_persons=tracking_cfg.get("max_persons", 5),
             track_timeout=tracking_cfg.get("track_timeout_seconds", 5.0),
             min_track_frames=tracking_cfg.get("min_track_frames", 3),
+            process_noise=tracking_cfg.get("kalman_process_noise", 0.1),
+            measurement_noise=tracking_cfg.get("kalman_measurement_noise", 0.5),
+            association_distance=tracking_cfg.get("association_distance", 1.5),
+            consecutive_frames=model_cfg.get("consecutive_frames", 3),
         )
 
         # 추론 엔진 (TRT 우선, 없으면 PyTorch)
@@ -189,7 +193,11 @@ class FallGuardianPipeline:
         )
 
         # SMS 발송기
+        # account_sid/auth_token이 비어 있으면 SMSSender 내부에서 환경변수
+        # TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN으로 자동 폴백한다.
         self.sms_sender = SMSSender(
+            account_sid=alert_cfg.get("twilio_account_sid", ""),
+            auth_token=alert_cfg.get("twilio_auth_token", ""),
             from_number=alert_cfg.get("twilio_from_number", ""),
             to_number=alert_cfg.get("guardian_phone", ""),
             mock_mode=mock_mode,
