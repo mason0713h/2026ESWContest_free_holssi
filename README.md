@@ -37,7 +37,8 @@ Team: 홀씨 | 팀장: 하승호 (경기대학교 AI컴퓨터공학부 1학년)
 └───────────────────────┬─────────────────────────────────────┘
                         │
 ┌───────────────────────▼─────────────────────────────────────┐
-│              Jetson Orin Nano Super (67 TOPS)               │
+│   Jetson Nano (4GB, JetPack 4.6.x, TRT 8.2.1) — 실제 배포 타깃  │
+│   (Jetson Orin Nano Super로 업그레이드 시 설치 방법 B 참고)      │
 │                                                             │
 │  [radar/capture.py]   → 슬라이딩 윈도우 16프레임 버퍼       │
 │  [radar/preprocessor.py] → Dynamic DBSCAN + 64점 정규화    │
@@ -89,8 +90,11 @@ fall_guardian/
 │   ├── benchmark_latency.py   # TensorRT 레이턴시 벤치마크
 │   └── visualize_pointcloud.py # 포인트클라우드 시각화
 ├── tests/
+│   ├── test_capture.py         # TLV 파싱, FrameWindow 슬라이딩 윈도우
 │   ├── test_preprocessor.py
 │   ├── test_model.py
+│   ├── test_multi_tracker.py
+│   ├── test_tensorrt_inference.py  # TRT 폴백 체인(ONNX Runtime/랜덤)
 │   └── test_alert.py
 └── main.py                    # asyncio 전체 파이프라인
 ```
@@ -177,22 +181,26 @@ python main.py --mock --debug   # 디버그 로그 포함
 
 ### 모델 학습
 ```bash
-# 1. 데이터 수집
-python scripts/collect_data.py --output data/raw/
+# 1. 데이터 수집 (raw 레이더 .npy는 data/ 아래에 저장되며, 개인정보 보호를
+#    위해 .gitignore로 전체 제외되어 있음)
+python scripts/collect_data.py --output data/
 
-# 2. 학습
-python training/train.py --data data/raw/ --epochs 100
+# 2. 학습 (mock 데이터로 파이프라인만 검증하려면 --mock_data 추가)
+python -m training.train --data_root data/ --epochs 100
 
-# 3. ONNX 변환
-python training/export_onnx.py --checkpoint checkpoints/best.pt
+# 3. ONNX 변환 (opset 13 고정 — Jetson Nano TRT 8.2.1 onnx-tensorrt 파서 제약)
+python -m training.export_onnx --checkpoint model/weights/best_checkpoint.pth \
+    --output model/weights/fall_guardian.onnx --opset 13
 
-# 4. TensorRT 엔진 빌드
-trtexec --onnx=fallguardian.onnx --int8 --saveEngine=fallguardian_int8.trt
+# 4. TensorRT 엔진 빌드 (model/tensorrt_inference.py의 TRTEngineBuilder 사용,
+#    또는 Jetson Nano 위에서 trtexec)
+python -m training.export_onnx --checkpoint model/weights/best_checkpoint.pth --export_trt
 ```
 
 ### 레이턴시 벤치마크
 ```bash
-python scripts/benchmark_latency.py --engine fallguardian_int8.trt
+# model/weights/fall_guardian.trt 엔진을 고정 경로로 로드
+python scripts/benchmark_latency.py --n_iter 100 --warmup 20
 ```
 
 ---
@@ -213,15 +221,17 @@ python scripts/benchmark_latency.py --engine fallguardian_int8.trt
 
 ```bash
 pytest tests/ -v
-# 72개 단위 테스트
+# 134개 단위 테스트
 ```
 
 ---
 
 ## 기술 스택
 
-- **언어**: Python 3.11
-- **AI 프레임워크**: PyTorch 2.x, TensorRT 10.x
+- **언어**: 개발 PC는 Python 3.11(학습/온라인 테스트), 실제 배포 타깃인
+  Jetson Nano는 JetPack 4.6.x 제약으로 Python 3.8(설치 방법 A 참고)
+- **AI 프레임워크**: PyTorch 2.x(학습), ONNX(opset 13) → TensorRT 8.2.1(Jetson Nano 추론).
+  Orin Nano Super 업그레이드 시 TensorRT 10.x
 - **레이더**: Texas Instruments mmWave SDK
 - **알림**: paho-mqtt, Twilio, pyttsx3, openai-whisper
 - **추적**: scikit-learn (DBSCAN), filterpy (칼만 필터)
