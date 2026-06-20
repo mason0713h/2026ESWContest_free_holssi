@@ -102,9 +102,11 @@ fall_guardian/
 | 부품 | 모델 | 역할 | 가격 |
 |------|------|------|------|
 | 레이더 | TI IWR6843ISK-ODS | 4D 포인트클라우드 | ~$100 |
-| 엣지 보드 | NVIDIA Jetson Orin Nano Super (8GB) | TensorRT 추론 | ~$149 |
+| 엣지 보드 | NVIDIA Jetson Nano (4GB, JetPack 4.6.x) — 실제 배포 타깃 | TensorRT 추론 | ~$99 |
 | 진동 센서 | MPU-6050 (욕실용) | 낙상 충격 트리거 | ~$2 |
 | 케이블 | USB-UART | 레이더↔Jetson 연결 | ~$5 |
+
+> 향후 Jetson Orin Nano Super (8GB)로 업그레이드 시 설치 방법 B 참고.
 
 ---
 
