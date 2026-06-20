@@ -18,3 +18,4 @@ checkpoints/
 data/raw/
 *.log
 .DS_Store
+reports/figures/
