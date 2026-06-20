@@ -212,10 +212,18 @@ class FallDataset(Dataset):
             torch.tensor(label, dtype=torch.long),
         )
 
-    def get_class_weights(self) -> torch.Tensor:
-        """클래스 불균형 보정용 가중치 계산."""
-        n_total = len(self._samples)
-        n_fall = sum(1 for _, l in self._samples if l == 1)
+    def get_class_weights(self, indices: Optional[list] = None) -> torch.Tensor:
+        """클래스 불균형 보정용 가중치 계산.
+
+        Args:
+            indices: 가중치를 계산할 대상 샘플 인덱스 목록. None이면 전체
+                데이터셋 기준. random_split으로 얻은 Subset(train_ds)에 대해
+                계산하려면 train_ds.indices를 전달해야 한다 (전체 데이터셋
+                기준으로 계산하면 train/val/test 분할 비율이 반영되지 않는다).
+        """
+        samples = self._samples if indices is None else [self._samples[i] for i in indices]
+        n_total = len(samples)
+        n_fall = sum(1 for _, l in samples if l == 1)
         n_normal = n_total - n_fall
 
         if n_fall == 0 or n_normal == 0:
@@ -225,10 +233,18 @@ class FallDataset(Dataset):
         weight_fall = n_total / (2 * n_fall)
         return torch.tensor([weight_normal, weight_fall], dtype=torch.float32)
 
-    def get_weighted_sampler(self) -> WeightedRandomSampler:
-        """불균형 클래스를 위한 WeightedRandomSampler 반환."""
-        class_weights = self.get_class_weights()
-        sample_weights = [class_weights[label].item() for _, label in self._samples]
+    def get_weighted_sampler(self, indices: Optional[list] = None) -> WeightedRandomSampler:
+        """불균형 클래스를 위한 WeightedRandomSampler 반환.
+
+        Args:
+            indices: 샘플러를 구성할 대상 샘플 인덱스 목록. random_split으로
+                나뉜 train Subset에 사용할 때는 train_ds.indices를 전달해야
+                한다. 전체 데이터셋 기준 가중치 목록을 그대로 Subset에 sampler로
+                사용하면 Subset 길이보다 큰 인덱스가 뽑혀 IndexError가 발생한다.
+        """
+        samples = self._samples if indices is None else [self._samples[i] for i in indices]
+        class_weights = self.get_class_weights(indices=indices)
+        sample_weights = [class_weights[label].item() for _, label in samples]
         return WeightedRandomSampler(
             weights=sample_weights,
             num_samples=len(sample_weights),
@@ -335,7 +351,7 @@ def create_dataloaders(
     sampler = None
     shuffle_train = True
     if use_weighted_sampler and hasattr(train_ds.dataset, "get_weighted_sampler"):
-        sampler = train_ds.dataset.get_weighted_sampler()
+        sampler = train_ds.dataset.get_weighted_sampler(indices=train_ds.indices)
         shuffle_train = False
 
     train_loader = DataLoader(

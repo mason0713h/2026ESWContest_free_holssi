@@ -6,11 +6,17 @@ training/export_onnx.py
 ONNX 변환 후 model/tensorrt_inference.py의 TRTEngineBuilder로
 TensorRT FP16 엔진으로 추가 변환 가능.
 
+opset 기본값은 17이 아니라 13이다. 실제 배포 타깃인 Jetson Nano
+(JetPack 4.6.x, TensorRT 8.2.1)의 내장 onnx-tensorrt 파서는 opset 13까지만
+공식 지원하므로, 더 높은 opset으로 export하면 dev PC에서는 ONNX 변환/
+onnxruntime 검증까지는 통과하더라도 실제 보드에서 TRT 엔진 빌드 시점에
+실패한다.
+
 사용법:
     python training/export_onnx.py \
         --checkpoint model/weights/best_checkpoint.pth \
         --output model/weights/fall_guardian.onnx \
-        --opset 17
+        --opset 13
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -59,7 +66,7 @@ class FallDetectorONNX(nn.Module):
 def export_onnx(
     checkpoint_path: Optional[str],
     output_path: str,
-    opset_version: int = 17,
+    opset_version: int = 13,
     batch_size: int = 1,
     window_size: int = 16,
     num_points: int = 64,
@@ -72,7 +79,10 @@ def export_onnx(
     Args:
         checkpoint_path: 체크포인트 경로 (None이면 랜덤 가중치)
         output_path: 저장할 ONNX 파일 경로
-        opset_version: ONNX opset 버전 (17 권장)
+        opset_version: ONNX opset 버전. Jetson Nano(TRT 8.2.1)의 onnx-tensorrt
+            파서가 opset 13까지만 공식 지원하므로 기본값을 13으로 둔다.
+            더 높은 opset은 dev PC ONNX 변환에는 성공해도 실제 보드에서
+            TRT 엔진 빌드가 실패할 수 있다.
         batch_size: 배치 크기 (TRT 최적화: 1)
         window_size: 윈도우 프레임 수
         num_points: 프레임당 포인트 수
@@ -119,6 +129,10 @@ def export_onnx(
                 "fall_probability": {0: "batch_size"},
             },
             verbose=False,
+            # torch>=2.x는 dynamo=True(신규 ExportedProgram 기반 익스포터)가 기본값이며
+            # onnxscript 패키지를 요구한다. Jetson Nano(TRT 8.2.1)용 opset<=13 호환성은
+            # 레거시 TorchScript 기반 익스포터를 전제로 검증했으므로 명시적으로 비활성화한다.
+            dynamo=False,
         )
         file_size_mb = output_path_obj.stat().st_size / (1024 * 1024)
         logger.info("ONNX 저장 완료: %s (%.1f MB)", output_path, file_size_mb)
@@ -186,7 +200,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="FallDetector ONNX 변환")
     parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--output", type=str, default="model/weights/fall_guardian.onnx")
-    parser.add_argument("--opset", type=int, default=17)
+    parser.add_argument("--opset", type=int, default=13, help="Jetson Nano TRT 8.2.1은 opset<=13만 공식 지원")
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--export_trt", action="store_true", help="TRT 변환도 수행")
     args = parser.parse_args()

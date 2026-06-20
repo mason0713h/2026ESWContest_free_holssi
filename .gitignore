@@ -14,8 +14,13 @@ venv/
 *.trt
 *.engine
 *.onnx
+*.pth
 checkpoints/
-data/raw/
+model/weights/*.pth
+# 수집된 레이더 포인트클라우드(.npy)는 실제 사람의 동작/낙상 데이터를 담을 수 있으므로
+# 통째로 제외한다. Mock 데이터는 FallDataset.generate_mock_dataset()로 재생성할 것.
+data/
 *.log
+logs/
 .DS_Store
 reports/figures/
