@@ -1,0 +1,23 @@
+# ============================================================
+# 99-iwr6843-radar.rules
+# ============================================================
+# IWR6843ISK-ODS는 USB-UART 브리지를 통해 ttyUSB0/ttyUSB1(또는 ttyACM0/1)
+# 두 개의 시리얼 포트로 enumerate 되는데, 다른 USB 장치가 함께 꽂혀 있거나
+# 재부팅 순서가 바뀌면 /dev/ttyUSB0 ↔ /dev/ttyUSB1 매핑이 뒤바뀔 수 있다.
+# 이 규칙은 vendor/product ID + 인터페이스 번호로 고정 심볼릭 링크를 만들어
+# config/config.yaml의 config_port/data_port를 항상 동일하게 유지한다.
+#
+# 사용법:
+#   1. 레이더를 연결한 뒤 아래 명령으로 실제 ID/인터페이스 번호를 확인:
+#        udevadm info -a -n /dev/ttyUSB0 | grep -E "idVendor|idProduct|bInterfaceNumber"
+#        udevadm info -a -n /dev/ttyUSB1 | grep -E "idVendor|idProduct|bInterfaceNumber"
+#   2. 아래 ATTRS{idVendor}/idProduct/ENV{...interface...} 값을 실제 값으로 교체.
+#      (TI XDS110 계열은 보통 idVendor==0451 이지만 보드/리비전에 따라
+#       다를 수 있으므로 반드시 1단계로 직접 확인할 것 — 추측값 사용 금지)
+#   3. 이 파일을 /etc/udev/rules.d/ 에 복사 후:
+#        sudo udevadm control --reload-rules && sudo udevadm trigger
+#   4. config.yaml에서 config_port: "/dev/iwr6843-cfg", data_port: "/dev/iwr6843-data"
+#      로 변경.
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="<VENDOR_ID>", ATTRS{idProduct}=="<PRODUCT_ID>", ENV{ID_USB_INTERFACE_NUM}=="00", SYMLINK+="iwr6843-cfg"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="<VENDOR_ID>", ATTRS{idProduct}=="<PRODUCT_ID>", ENV{ID_USB_INTERFACE_NUM}=="01", SYMLINK+="iwr6843-data"

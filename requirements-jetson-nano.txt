@@ -1,0 +1,64 @@
+# ============================================================
+# Fall Guardian - 구형 Jetson Nano (4GB) 전용 의존성
+# ============================================================
+# 대상 환경: JetPack 4.6.x (L4T R32.7.x, Ubuntu 18.04, CUDA 10.2,
+#            TensorRT 8.2.1, cuDNN 8.2)
+#
+# 주의사항:
+#   1. JetPack 4.6.x 기본 Python은 3.6.9이며, numpy>=1.24/scipy>=1.10/
+#      openai-whisper 등 최신 패키지는 Python 3.6을 지원하지 않는다.
+#      반드시 Python 3.8(소스 빌드 또는 community wheel)을 사용할 것.
+#      (scripts/setup_jetson_nano.sh 참고)
+#   2. torch/torchvision은 PyPI가 아닌 NVIDIA Jetson 전용 wheel을 사용한다.
+#      https://forums.developer.nvidia.com/t/pytorch-for-jetson 페이지에서
+#      JetPack 4.6.x + Python 3.8 조합 wheel을 받아 설치한다.
+#      (pip install <다운로드한 .whl 경로>)
+#   3. tensorrt/pycuda/onnxruntime은 PyPI에 aarch64+Jetson 빌드가 없으므로
+#      JetPack에 포함된 시스템 패키지(/usr/lib/python3.6/dist-packages 등)를
+#      venv에서 그대로 참조하도록 --system-site-packages 로 venv를 만들고,
+#      pycuda만 소스 빌드한다. 아래 패키지 목록에서 tensorrt는 제외되어 있다.
+#
+# 설치: pip install -r requirements-jetson-nano.txt
+# ============================================================
+
+# ── 과학 계산 (Python 3.8 호환 최신 버전 상한 고정) ──────
+numpy==1.24.4
+scipy==1.10.1
+scikit-learn==1.3.2        # DBSCAN
+
+# ── 레이더 통신 ─────────────────────────────────
+pyserial>=3.5
+
+# ── 설정 파일 ───────────────────────────────────
+PyYAML>=6.0
+
+# ── 알림 시스템 ─────────────────────────────────
+paho-mqtt>=1.6.1
+aiohttp>=3.9.0
+twilio>=8.0.0
+
+# ── 음성 확인 ───────────────────────────────────
+# openai-whisper는 ffmpeg 시스템 패키지 필요: sudo apt-get install ffmpeg
+pyttsx3>=2.90
+openai-whisper==20231117
+sounddevice>=0.4.6
+# espeak-ng: sudo apt-get install espeak-ng (한국어 TTS 음성 데이터 별도 필요)
+
+# ── ONNX (학습 PC/x86에서 변환 후 Jetson Nano로는 .onnx만 전달) ──
+onnx>=1.14.0,<1.16.0
+
+# ── 시각화 (선택, Jetson 본체에서는 보통 비활성) ──────────
+# matplotlib>=3.7.0
+# Pillow>=10.0.0
+
+# ── 테스트 ──────────────────────────────────────
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# ── 별도 설치 필요 (이 파일로 설치되지 않음) ──────────────
+# torch, torchvision      -> NVIDIA Jetson 전용 wheel (위 주석 참고)
+# tensorrt, pycuda        -> scripts/setup_jetson_nano.sh 참고
+#   (tensorrt는 JetPack 시스템 패키지를 venv --system-site-packages로 참조,
+#    pycuda는 CUDA_ROOT=/usr/local/cuda 환경에서 pip install pycuda 로 소스 빌드)
+# onnxruntime             -> Jetson 전용 wheel (Q-engineering 등에서 배포하는
+#                            JetPack 4.6 + Python 3.8 빌드 사용, 없으면 TRT만 사용)

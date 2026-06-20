@@ -23,6 +23,7 @@ import struct
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Deque, List, Optional, Tuple
 
 import numpy as np
@@ -147,6 +148,7 @@ class RadarCapture:
         window_size: int = 16,
         stride: int = 8,
         mock_mode: bool = False,
+        cfg_file: Optional[str] = None,
     ) -> None:
         self.config_port = config_port
         self.data_port = data_port
@@ -155,6 +157,10 @@ class RadarCapture:
         self.window_size = window_size
         self.stride = stride
         self.mock_mode = mock_mode
+        # mmWave Demo Visualizer로 생성한 실제 .cfg 파일 경로.
+        # 지정하지 않으면 내장 기본 명령어를 사용한다 (참고용, 실제 장비
+        # 캘리브레이션값과 다를 수 있음 — 가능하면 항상 .cfg 파일을 사용할 것).
+        self.cfg_file = cfg_file
 
         self._ser_config = None   # 설정 포트 (pyserial)
         self._ser_data = None     # 데이터 포트 (pyserial)
@@ -203,12 +209,33 @@ class RadarCapture:
             self._ser_data.close()
         logger.info("레이더 연결 해제")
 
-    def _send_radar_config(self) -> None:
+    def _load_cfg_commands(self) -> List[str]:
         """
-        레이더에 기본 설정 명령어 전송.
-        실제 배포 시 .cfg 파일에서 읽도록 수정 가능.
+        설정 명령어 목록을 로드.
+
+        cfg_file이 지정되어 있으면 TI mmWave Demo Visualizer로 생성한
+        실제 .cfg 파일을 읽어 그대로 사용한다 (빈 줄/주석 줄 제외).
+        지정되지 않으면 내장 기본값을 폴백으로 사용한다.
         """
-        commands = [
+        if self.cfg_file:
+            cfg_path = Path(self.cfg_file)
+            if not cfg_path.exists():
+                raise FileNotFoundError(f".cfg 파일을 찾을 수 없음: {self.cfg_file}")
+            lines = []
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("%"):
+                        continue
+                    lines.append(line + "\n")
+            logger.info(".cfg 파일 로드: %s (%d개 명령)", self.cfg_file, len(lines))
+            return lines
+
+        logger.warning(
+            "cfg_file 미지정 - 내장 기본 명령어 사용 (실제 장비 특성과 다를 수 있음, "
+            "radar.cfg_file 설정 권장)"
+        )
+        return [
             "sensorStop\n",
             "flushCfg\n",
             # 기본 프로파일 설정 (60GHz, range 5m, velocity ±3m/s)
@@ -225,10 +252,40 @@ class RadarCapture:
             "extendedMaxVelocity -1 0\n",
             "sensorStart\n",
         ]
+
+    def _send_radar_config(self) -> None:
+        """
+        레이더에 설정 명령어를 한 줄씩 전송하고, 각 명령에 대해
+        CLI 포트가 회신하는 "Done"/에러 응답을 확인한다.
+
+        TI mmWave SDK의 CLI는 명령 1개당 응답 1개를 보장하므로,
+        응답을 기다리지 않고 다음 명령을 보내면 버퍼 오버플로우로
+        설정이 누락될 수 있다 (실제 하드웨어에서 빈번히 발생하는 문제).
+        """
+        commands = self._load_cfg_commands()
         for cmd in commands:
+            self._ser_config.reset_input_buffer()
             self._ser_config.write(cmd.encode())
-            time.sleep(0.05)
+            response = self._wait_for_cli_response(timeout=1.0)
+            if "Done" not in response and cmd.strip() not in ("sensorStop",):
+                logger.warning(
+                    "레이더 CLI 응답 비정상 (cmd=%r): %r", cmd.strip(), response.strip()
+                )
         logger.info("레이더 설정 전송 완료 (%d 명령)", len(commands))
+
+    def _wait_for_cli_response(self, timeout: float = 1.0) -> str:
+        """CLI 포트에서 명령 응답("Done" 또는 에러 메시지)을 읽는다."""
+        deadline = time.time() + timeout
+        buf = b""
+        while time.time() < deadline:
+            chunk = self._ser_config.read(256)
+            if chunk:
+                buf += chunk
+                if b"Done" in buf or b"Error" in buf:
+                    break
+            else:
+                time.sleep(0.01)
+        return buf.decode(errors="replace")
 
     # ── TLV 파싱 ───────────────────────────────
 

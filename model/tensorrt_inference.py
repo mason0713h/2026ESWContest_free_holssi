@@ -4,10 +4,15 @@ model/tensorrt_inference.py
 TensorRT FP16 최적화 추론 엔진.
 
 ONNX 모델을 TensorRT FP16으로 변환하고,
-pycuda + tensorrt를 사용하여 Jetson Orin Nano Super에서
-< 50ms 실시간 추론을 수행한다.
+pycuda + tensorrt를 사용하여 Jetson Nano(JetPack 4.6.x, TensorRT 8.2)
+에서 실시간 추론을 수행한다.
 
-하드웨어 없이 실행 시 (TensorRT 미설치) PyTorch CPU 폴백 추론을 사용한다.
+바인딩 기반 레거시 TensorRT API(get_binding_shape/execute_async_v2)를
+사용하므로 TRT 8.x 계열과 호환된다. TRT 8.4 이상에서만 존재하는
+MemoryPoolType API는 TRTEngineBuilder.build_from_onnx 내부에서
+존재 여부를 확인해 자동으로 max_workspace_size로 폴백한다.
+
+하드웨어 없이 실행 시 (TensorRT 미설치) ONNX Runtime → 랜덤 폴백 순으로 대체한다.
 
 추론 파이프라인:
     numpy 입력 → GPU 메모리 복사 → TRT 추론 → 결과 반환
@@ -95,11 +100,14 @@ class TRTEngineBuilder:
                     return False
 
             # Builder 설정
+            # TRT 8.4+ 는 MemoryPoolType API, 구형 Jetson Nano(JetPack 4.6, TRT 8.2)는
+            # max_workspace_size 속성만 지원하므로 둘 다 지원하도록 분기한다.
             config = builder.create_builder_config()
-            config.set_memory_pool_limit(
-                trt.MemoryPoolType.WORKSPACE,
-                int(self.workspace_gb * (1 << 30)),
-            )
+            workspace_bytes = int(self.workspace_gb * (1 << 30))
+            if hasattr(trt, "MemoryPoolType") and hasattr(config, "set_memory_pool_limit"):
+                config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_bytes)
+            else:
+                config.max_workspace_size = workspace_bytes  # TRT < 8.4 (Jetson Nano)
 
             if self.fp16_mode and builder.platform_has_fast_fp16:
                 config.set_flag(trt.BuilderFlag.FP16)
@@ -301,6 +309,7 @@ class TRTInferenceEngine:
                 proba = self._softmax(output[0])
                 fall_prob = float(proba[1])
                 elapsed_ms = (time.perf_counter() - t0) * 1000
+                self._latency_history.append(elapsed_ms)
                 return fall_prob >= self.fall_threshold, fall_prob, elapsed_ms
             except Exception as e:
                 logger.debug("ONNX Runtime 폴백 실패: %s", e)
@@ -308,6 +317,7 @@ class TRTInferenceEngine:
         # 최종 폴백: 랜덤 (Mock 테스트용)
         elapsed_ms = (time.perf_counter() - t0) * 1000 + np.random.uniform(5, 15)
         fall_prob = float(np.random.uniform(0.0, 0.3))  # 대부분 낙상 없음
+        self._latency_history.append(elapsed_ms)
         return fall_prob >= self.fall_threshold, fall_prob, elapsed_ms
 
     @staticmethod

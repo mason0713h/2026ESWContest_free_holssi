@@ -28,6 +28,11 @@ radar:
   magic_word: [2, 1, 4, 3, 6, 5, 8, 7]
   enhanced_point_cloud_tlv: 1006
 
+  # TI mmWave Demo Visualizer로 생성한 실제 .cfg 파일 경로.
+  # 반드시 사용 중인 IWR6843ISK-ODS 펌웨어/안테나 구성에 맞는 .cfg를 지정할 것.
+  # null이면 radar/capture.py 내장 기본 명령어로 폴백한다 (실장비 검증 안 됨).
+  cfg_file: "config/iwr6843_profile.cfg"
+
   # Mock 모드 (실제 하드웨어 없이 테스트)
   mock_mode: false
   mock_data_path: "data/mock/"
@@ -85,7 +90,9 @@ tracking:
   max_persons: 5
   track_timeout_seconds: 5.0
   min_track_frames: 3
-  iou_threshold: 0.3
+  # 트랙-관측 매칭 최대 거리 (m). 박스 기반 IOU가 아니라 포인트 기반
+  # Kalman 추적이므로 거리 임계값을 사용한다 (radar/multi_tracker.py).
+  association_distance: 1.5
   kalman_process_noise: 0.1
   kalman_measurement_noise: 0.5
 

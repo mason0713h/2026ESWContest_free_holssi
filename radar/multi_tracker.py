@@ -39,9 +39,10 @@ class TrackedPerson:
         age_frames: 추적 유지 프레임 수
         points_history: 최근 프레임의 포인트들
         is_active: 현재 활성 상태
-        fall_detected: 낙상 감지 여부
+        fall_detected: 낙상 감지 여부 (연속 프레임 확정 후)
         fall_confidence: 낙상 확률
         fall_detected_time: 낙상 감지 시각
+        raw_fall_streak: 모델이 연속으로 낙상이라고 판단한 프레임 수 (확정 전 카운터)
     """
     person_id: int
     position: np.ndarray                  # shape (3,): [x, y, z]
@@ -53,6 +54,7 @@ class TrackedPerson:
     fall_detected: bool = False
     fall_confidence: float = 0.0
     fall_detected_time: Optional[float] = None
+    raw_fall_streak: int = 0
 
     def mark_fall(self, confidence: float) -> None:
         """낙상으로 표시."""
@@ -66,6 +68,7 @@ class TrackedPerson:
         self.fall_detected = False
         self.fall_confidence = 0.0
         self.fall_detected_time = None
+        self.raw_fall_streak = 0
 
     @property
     def fall_duration(self) -> float:
@@ -178,6 +181,7 @@ class MultiPersonTracker:
         process_noise: Kalman Filter 프로세스 노이즈
         measurement_noise: Kalman Filter 측정 노이즈
         association_distance: 트랙-관측 매칭 최대 거리 (m)
+        consecutive_frames: 낙상 확정에 필요한 연속 프레임 수 (오경보 억제)
     """
 
     def __init__(
@@ -190,6 +194,7 @@ class MultiPersonTracker:
         process_noise: float = 0.1,
         measurement_noise: float = 0.5,
         association_distance: float = 1.5,
+        consecutive_frames: int = 3,
     ) -> None:
         self.max_persons = max_persons
         self.track_timeout = track_timeout
@@ -199,6 +204,7 @@ class MultiPersonTracker:
         self.process_noise = process_noise
         self.measurement_noise = measurement_noise
         self.association_distance = association_distance
+        self.consecutive_frames = max(1, consecutive_frames)
 
         self._tracks: Dict[int, TrackedPerson] = {}
         self._kalman_filters: Dict[int, KalmanFilter3D] = {}
@@ -400,9 +406,13 @@ class MultiPersonTracker:
         """
         특정 인원의 낙상 상태 업데이트.
 
+        모델이 단일 프레임에서 잘못 낙상으로 판단하는 오경보를 줄이기 위해,
+        self.consecutive_frames 만큼 연속으로 낙상이 감지되어야 실제로
+        track.fall_detected가 True로 확정된다.
+
         Args:
             person_id: 대상 인원 ID
-            fall_detected: 낙상 여부
+            fall_detected: 낙상 여부 (모델의 프레임 단위 판단)
             confidence: 낙상 확률
         """
         if person_id not in self._tracks:
@@ -410,11 +420,17 @@ class MultiPersonTracker:
 
         track = self._tracks[person_id]
         if fall_detected:
-            track.mark_fall(confidence)
-            logger.warning(
-                "트랙 #%d 낙상 감지 (confidence=%.3f)", person_id, confidence
-            )
+            track.raw_fall_streak += 1
+            if track.raw_fall_streak >= self.consecutive_frames:
+                was_confirmed = track.fall_detected
+                track.mark_fall(confidence)
+                if not was_confirmed:
+                    logger.warning(
+                        "트랙 #%d 낙상 확정 (연속 %d프레임, confidence=%.3f)",
+                        person_id, track.raw_fall_streak, confidence,
+                    )
         else:
+            track.raw_fall_streak = 0
             if track.fall_detected:
                 track.clear_fall()
                 logger.info("트랙 #%d 낙상 해제", person_id)

@@ -211,6 +211,45 @@ class PointCloudPreprocessor:
 
         return normalized
 
+    def process_person_history(
+        self,
+        points_history: List[np.ndarray],
+        window_size: int,
+        rng: Optional[np.random.Generator] = None,
+    ) -> np.ndarray:
+        """
+        MultiPersonTracker가 인원별로 분리한 포인트 히스토리를 전처리.
+
+        DBSCAN으로 이미 분리된 클러스터이므로 추가 노이즈 제거는
+        건너뛰고 포인트 수 정규화/좌표 정규화만 적용한다.
+        프레임 수가 window_size보다 적으면 가장 오래된 프레임을
+        복제하여 앞쪽을 채운다 (트랙이 막 생성된 경우).
+
+        Args:
+            points_history: 인원별 (M_t, 6) 포인트 배열 리스트 (시간순)
+            window_size: 모델 입력 시퀀스 길이 (T)
+            rng: 난수 생성기
+
+        Returns:
+            (window_size, target_points, 6) 텐서
+        """
+        if rng is None:
+            rng = np.random.default_rng()
+
+        if not points_history:
+            return np.zeros((window_size, self.target_points, 6), dtype=np.float32)
+
+        history = list(points_history[-window_size:])
+        if len(history) < window_size:
+            pad = [history[0]] * (window_size - len(history))
+            history = pad + history
+
+        frames = [
+            self.normalize_coords(self.normalize_point_count(pts, rng=rng))
+            for pts in history
+        ]
+        return np.stack(frames, axis=0).astype(np.float32)
+
     def process_window(
         self,
         window: List[PointCloud],

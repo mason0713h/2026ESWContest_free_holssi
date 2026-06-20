@@ -26,8 +26,10 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
+import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -35,6 +37,16 @@ from radar.capture import RadarCapture, PointCloud
 from radar.preprocessor import PointCloudPreprocessor
 
 logger = logging.getLogger(__name__)
+
+
+def load_config(config_path: str) -> dict:
+    """config.yaml 로드. 파일이 없으면 빈 dict 반환 (전부 기본값 사용)."""
+    path = Path(config_path)
+    if not path.is_file():
+        logger.warning("설정 파일 없음: %s (기본값 사용)", config_path)
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
 
 class DataCollector:
@@ -54,13 +66,22 @@ class DataCollector:
         window_size: int = 16,
         target_points: int = 64,
         mock_mode: bool = False,
+        radar_cfg: Optional[dict] = None,
     ) -> None:
         self.output_dir = Path(output_dir)
         self.window_size = window_size
         self.mock_mode = mock_mode
 
+        radar_cfg = radar_cfg or {}
         self.capture = RadarCapture(
-            window_size=window_size, stride=window_size, mock_mode=mock_mode
+            config_port=radar_cfg.get("config_port", "/dev/ttyUSB0"),
+            data_port=radar_cfg.get("data_port", "/dev/ttyUSB1"),
+            config_baudrate=radar_cfg.get("config_baudrate", 115200),
+            data_baudrate=radar_cfg.get("data_baudrate", 921600),
+            window_size=window_size,
+            stride=window_size,
+            mock_mode=mock_mode,
+            cfg_file=radar_cfg.get("cfg_file"),
         )
         self.preprocessor = PointCloudPreprocessor(target_points=target_points)
 
@@ -145,9 +166,16 @@ class DataCollector:
 
 async def interactive_collect(args: argparse.Namespace) -> None:
     """대화형 수집 모드."""
+    config = load_config(args.config)
+    radar_cfg = config.get("radar", {})
+    prep_cfg = config.get("preprocessing", {})
+
     collector = DataCollector(
         output_dir=args.output,
+        window_size=radar_cfg.get("window_size", 16),
+        target_points=prep_cfg.get("target_points", 64),
         mock_mode=args.mock,
+        radar_cfg=radar_cfg,
     )
 
     if not args.mock:
@@ -180,9 +208,16 @@ async def interactive_collect(args: argparse.Namespace) -> None:
 
 async def batch_collect(args: argparse.Namespace) -> None:
     """배치 수집 모드 (--label 지정)."""
+    config = load_config(args.config)
+    radar_cfg = config.get("radar", {})
+    prep_cfg = config.get("preprocessing", {})
+
     collector = DataCollector(
         output_dir=args.output,
+        window_size=radar_cfg.get("window_size", 16),
+        target_points=prep_cfg.get("target_points", 64),
         mock_mode=args.mock,
+        radar_cfg=radar_cfg,
     )
 
     if not args.mock:
@@ -204,6 +239,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Fall Guardian 데이터 수집")
     parser.add_argument("--output", type=str, default="data/", help="저장 디렉토리")
+    parser.add_argument("--config", type=str, default="config/config.yaml", help="설정 파일 경로 (시리얼 포트/.cfg 파일 등)")
     parser.add_argument("--mock", action="store_true", help="Mock 모드")
     parser.add_argument("--label", type=str, choices=["fall", "normal"], help="배치 수집 라벨")
     parser.add_argument("--duration", type=float, default=15.0, help="수집 시간 (초)")

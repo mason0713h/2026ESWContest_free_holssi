@@ -129,9 +129,12 @@ class FallGuardianPipeline:
         self.capture = RadarCapture(
             config_port=radar_cfg.get("config_port", "/dev/ttyUSB0"),
             data_port=radar_cfg.get("data_port", "/dev/ttyUSB1"),
+            config_baudrate=radar_cfg.get("config_baudrate", 115200),
+            data_baudrate=radar_cfg.get("data_baudrate", 921600),
             window_size=radar_cfg.get("window_size", 16),
             stride=radar_cfg.get("stride", 8),
             mock_mode=mock_mode or radar_cfg.get("mock_mode", False),
+            cfg_file=radar_cfg.get("cfg_file"),
         )
 
         # 전처리기
@@ -150,6 +153,10 @@ class FallGuardianPipeline:
             max_persons=tracking_cfg.get("max_persons", 5),
             track_timeout=tracking_cfg.get("track_timeout_seconds", 5.0),
             min_track_frames=tracking_cfg.get("min_track_frames", 3),
+            process_noise=tracking_cfg.get("kalman_process_noise", 0.1),
+            measurement_noise=tracking_cfg.get("kalman_measurement_noise", 0.5),
+            association_distance=tracking_cfg.get("association_distance", 1.5),
+            consecutive_frames=model_cfg.get("consecutive_frames", 3),
         )
 
         # 추론 엔진 (TRT 우선, 없으면 PyTorch)
@@ -186,7 +193,11 @@ class FallGuardianPipeline:
         )
 
         # SMS 발송기
+        # account_sid/auth_token이 비어 있으면 SMSSender 내부에서 환경변수
+        # TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN으로 자동 폴백한다.
         self.sms_sender = SMSSender(
+            account_sid=alert_cfg.get("twilio_account_sid", ""),
+            auth_token=alert_cfg.get("twilio_auth_token", ""),
             from_number=alert_cfg.get("twilio_from_number", ""),
             to_number=alert_cfg.get("guardian_phone", ""),
             mock_mode=mock_mode,
@@ -338,8 +349,11 @@ class FallGuardianPipeline:
                 )
         else:
             for person in active_persons:
-                # 인원별 포인트로 재전처리 (가용 히스토리 사용)
-                person_tensor = tensor  # 단순화: 전체 씬 텐서 사용
+                # 인원별로 DBSCAN 분리된 포인트 히스토리를 독립적으로 전처리
+                history = self.tracker.get_person_window(person.person_id) or []
+                person_tensor = self.preprocessor.process_person_history(
+                    history, window_size=tensor.shape[0]
+                )
                 fall_detected, fall_prob = self._infer(person_tensor)
 
                 # 오경보 억제: 연속 3 프레임 낙상 감지 시만 인정
@@ -347,8 +361,8 @@ class FallGuardianPipeline:
                     person.person_id, fall_detected, fall_prob
                 )
 
-                # 4. Long-lie 업데이트
-                person_pts = latest_pc.points  # 실제로는 person별 분리 포인트
+                # 4. Long-lie 업데이트 (해당 인원의 최신 분리 포인트 사용)
+                person_pts = history[-1] if history else np.zeros((0, 6), dtype=np.float32)
                 alert_level = self.long_lie.update(
                     person_id=person.person_id,
                     fall_detected=fall_detected and fall_prob >= 0.7,
@@ -369,6 +383,9 @@ class FallGuardianPipeline:
         """파이프라인 메인 루프 실행."""
         self._running = True
         self._stats["start_time"] = time.time()
+
+        # 레이더 시리얼 포트 연결 및 .cfg 전송 (mock 모드에서는 내부에서 스킵됨)
+        self.capture.connect()
 
         # MQTT 연결
         if not self.mqtt_publisher.connect():
@@ -392,6 +409,7 @@ class FallGuardianPipeline:
         finally:
             heartbeat_task.cancel()
             self.capture.stop()
+            self.capture.disconnect()
             self.mqtt_publisher.disconnect()
             self._print_stats()
 
@@ -453,8 +471,12 @@ async def main() -> None:
 
     def shutdown_handler():
         logger.info("종료 신호 수신. 안전하게 종료 중...")
+        # pipeline.stop()은 _running 플래그만 내리고, 실제 종료는 run() 내부의
+        # 캡처 루프가 다음 반복에서 이를 감지하고 빠져나오며 완료된다.
+        # loop.stop()을 여기서 동기 호출하면 run() 코루틴이 아직 완전히
+        # unwind되지 않은 상태에서 루프가 멈춰 "Event loop stopped before
+        # Future completed" RuntimeError가 발생하므로 호출하지 않는다.
         pipeline.stop()
-        loop.stop()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, shutdown_handler)
