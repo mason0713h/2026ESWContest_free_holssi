@@ -12,6 +12,9 @@ scripts/generate_report_figures.py
     3. fig3_longlie_timeline.png   - Long-lie 알림 단계 전이 타임라인
     4. fig4_model_params.png       - 모델 파라미터 구성 (모듈별)
     5. fig5_onnx_size.png          - PyTorch(.pt) vs ONNX(.onnx) 모델 크기 비교
+    6. fig6_denoising_scatter.png  - DBSCAN 디노이징 전/후 포인트클라우드 산점도
+    7. fig7_multi_tracker_trajectory.png - 2인 동시 추적 시 칼만 필터 궤적/ID 유지
+    8. fig8_model_architecture.png - 모델 데이터 흐름 블록 다이어그램 (차원 표기)
 
 사용:
     python scripts/generate_report_figures.py
@@ -285,6 +288,133 @@ def fig5_onnx_size() -> None:
     print(f"[5/5] fig5_onnx_size.png  (.pt={pt_size:.2f}MB, .onnx={onnx_size:.2f}MB)")
 
 
+def fig6_denoising_scatter() -> None:
+    """Mock 낙상 프레임 1개에 DBSCAN 디노이징 전/후를 3D 산점도로 비교."""
+    from radar.capture import RadarCapture
+    from radar.preprocessor import PointCloudPreprocessor
+
+    capture = RadarCapture(mock_mode=True)
+    preprocessor = PointCloudPreprocessor()
+
+    # 여러 프레임을 시도해 노이즈가 실제로 제거되는(차이가 보이는) 샘플을 고른다.
+    for _ in range(20):
+        pc = capture._generate_mock_frame(scenario="fall")
+        if len(pc.points) >= preprocessor.dbscan_min_samples:
+            denoised = preprocessor.denoise(pc.points)
+            if len(denoised) < len(pc.points):
+                break
+
+    kept_mask = np.zeros(len(pc.points), dtype=bool)
+    if len(denoised) > 0:
+        # denoise()가 좌표를 그대로 보존하므로 좌표 일치로 kept 여부를 역추적한다.
+        denoised_set = {tuple(row) for row in denoised[:, :3].round(6)}
+        for i, row in enumerate(pc.points[:, :3].round(6)):
+            if tuple(row) in denoised_set:
+                kept_mask[i] = True
+
+    fig = plt.figure(figsize=(8, 6))
+    ax = fig.add_subplot(111, projection="3d")
+    xyz = pc.points[:, :3]
+    ax.scatter(*xyz[kept_mask].T, c="#4C72B0", label=f"Kept ({kept_mask.sum()})", s=25, alpha=0.8)
+    ax.scatter(*xyz[~kept_mask].T, c="#C44E52", marker="x", label=f"Removed as noise ({(~kept_mask).sum()})", s=35)
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_zlabel("Z (m, height)")
+    ax.set_title(f"DBSCAN Denoising on a Single Mock Fall Frame\n(n_points={len(pc.points)}, eps={preprocessor.dbscan_eps}, min_samples={preprocessor.dbscan_min_samples})")
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(OUT_DIR / "fig6_denoising_scatter.png", dpi=150)
+    plt.close(fig)
+    print(f"[6/8] fig6_denoising_scatter.png  (kept={kept_mask.sum()}, removed={(~kept_mask).sum()})")
+
+
+def fig7_multi_tracker_trajectory(n_frames: int = 50) -> None:
+    """가상의 2인이 서로 다른 경로로 움직일 때 칼만 필터가 ID를 유지하며
+    추적하는지 궤적으로 시각화."""
+    from radar.multi_tracker import MultiPersonTracker
+
+    rng = np.random.default_rng(3)
+    tracker = MultiPersonTracker(dbscan_eps=0.6, dbscan_min_samples=3, consecutive_frames=1)
+
+    # Person A: 좌측에서 우측으로 직선 보행. Person B: 원형 경로로 보행.
+    history: dict = {}
+    for t in range(n_frames):
+        frac = t / n_frames
+        center_a = np.array([-2.0 + 4.0 * frac, 0.5, 1.6])
+        angle = frac * 2 * np.pi
+        center_b = np.array([1.5 * np.cos(angle), 1.5 * np.sin(angle) + 2.0, 1.5])
+
+        cluster_a = center_a + rng.normal(0, 0.05, size=(15, 3))
+        cluster_b = center_b + rng.normal(0, 0.05, size=(15, 3))
+        points_xyz = np.vstack([cluster_a, cluster_b])
+        extra = rng.normal(0, 0.1, size=(len(points_xyz), 3))  # vel, snr, noise 자리
+        points = np.hstack([points_xyz, extra])
+
+        tracked = tracker.update(points)
+        for person in tracked:
+            history.setdefault(person.person_id, []).append(person.position.copy())
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    colors = ["#4C72B0", "#C44E52", "#55A868", "#8172B2"]
+    for i, (pid, positions) in enumerate(history.items()):
+        arr = np.array(positions)
+        ax.plot(arr[:, 0], arr[:, 1], marker="o", markersize=3, linewidth=1.5,
+                color=colors[i % len(colors)], label=f"Track ID {pid} (n={len(arr)} frames)")
+        ax.scatter(arr[0, 0], arr[0, 1], color=colors[i % len(colors)], marker="^", s=100, zorder=5)
+        ax.scatter(arr[-1, 0], arr[-1, 1], color=colors[i % len(colors)], marker="s", s=100, zorder=5)
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_title(f"Multi-Person Kalman Tracking (simulated, {n_frames} frames)\n▲ start, ■ end — distinct track IDs preserved")
+    ax.legend()
+    ax.grid(alpha=0.3)
+    ax.set_aspect("equal")
+    fig.tight_layout()
+    fig.savefig(OUT_DIR / "fig7_multi_tracker_trajectory.png", dpi=150)
+    plt.close(fig)
+    print(f"[7/8] fig7_multi_tracker_trajectory.png  (track IDs observed: {sorted(history.keys())})")
+
+
+def fig8_model_architecture() -> None:
+    """모델 데이터 흐름을 실제 코드의 차원(dim)으로 그린 블록 다이어그램."""
+    from model.fall_detector import FallDetector
+
+    model = FallDetector()
+    pn = model.td_pointnet.pointnet
+    gru = model.gru_classifier
+
+    blocks = [
+        ("Input\npoint cloud", "(B, 16, 64, 6)"),
+        ("T-Net x2 +\nConv1d MLP\n(per-frame PointNet)", f"out: (B, 16, {pn.output_dim})"),
+        ("Global Max Pool\n(per frame)", f"(B, 16, {pn.output_dim})"),
+        (f"GRU\nhidden={gru.hidden_size}, layers={gru.gru.num_layers}", f"(B, {gru.hidden_size})"),
+        ("Classifier MLP", "(B, 2) logits"),
+        ("Softmax", "(B, 2) probability"),
+    ]
+
+    fig, ax = plt.subplots(figsize=(12, 3.2))
+    n = len(blocks)
+    box_w, box_h, gap = 1.7, 1.4, 0.55
+    for i, (name, dims) in enumerate(blocks):
+        x0 = i * (box_w + gap)
+        ax.add_patch(plt.Rectangle((x0, 0), box_w, box_h, facecolor="#4C72B0" if i % 2 == 0 else "#55A868",
+                                    alpha=0.75, edgecolor="black"))
+        ax.text(x0 + box_w / 2, box_h * 0.62, name, ha="center", va="center", fontsize=8.5, weight="bold")
+        ax.text(x0 + box_w / 2, box_h * 0.22, dims, ha="center", va="center", fontsize=7.5, style="italic")
+        if i < n - 1:
+            ax.annotate("", xy=(x0 + box_w + gap * 0.15, box_h / 2), xytext=(x0 + box_w, box_h / 2),
+                        arrowprops=dict(arrowstyle="->", lw=1.5))
+
+    ax.set_xlim(-0.3, n * (box_w + gap))
+    ax.set_ylim(-0.3, box_h + 0.3)
+    ax.axis("off")
+    total_params = sum(p.numel() for p in model.parameters())
+    ax.set_title(f"FallDetector Data Flow (B=batch, total params={total_params/1e6:.2f}M)", fontsize=10)
+    fig.tight_layout()
+    fig.savefig(OUT_DIR / "fig8_model_architecture.png", dpi=150)
+    plt.close(fig)
+    print("[8/8] fig8_model_architecture.png")
+
+
 if __name__ == "__main__":
     print(f"출력 디렉토리: {OUT_DIR}")
     fig1_pipeline_latency()
@@ -292,6 +422,9 @@ if __name__ == "__main__":
     fig3_longlie_timeline()
     fig4_model_params()
     fig5_onnx_size()
-    print("\n완료. 5개 그래프가 reports/figures/ 에 저장되었습니다.")
+    fig6_denoising_scatter()
+    fig7_multi_tracker_trajectory()
+    fig8_model_architecture()
+    print("\n완료. 8개 그래프가 reports/figures/ 에 저장되었습니다.")
     print("주의: 모두 mock 데이터 / 학습되지 않은 랜덤 가중치 기준이며, ")
     print("실제 성능(F1 등)이나 TensorRT 가속 효과를 나타내지 않습니다.")
