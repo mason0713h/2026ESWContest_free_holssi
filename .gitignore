@@ -23,4 +23,7 @@ data/
 *.log
 logs/
 .DS_Store
-reports/figures/
+# reports/figures/는 scripts/generate_report_figures.py로 생성한 서류용
+# 그래프(PNG)를 git에 포함시키기 위해 더 이상 제외하지 않는다.
+# _tmp_export/ 등 스크립트 실행 중 임시 산출물만 별도로 제외.
+reports/figures/_tmp_export/
