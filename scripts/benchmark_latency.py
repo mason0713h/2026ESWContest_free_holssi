@@ -4,7 +4,10 @@ scripts/benchmark_latency.py
 추론 지연시간 벤치마크 스크립트.
 
 TensorRT / PyTorch / ONNX Runtime 추론 엔진별 지연시간을 측정하고
-Jetson Orin Nano Super에서의 실시간성 (< 50ms 목표)을 검증한다.
+Jetson Nano(4GB, JetPack 4.6.x)에서의 실시간성 (< 50ms 목표)을 검증한다.
+단, 이 스크립트 자체는 CPU(PyTorch eager)/TRT 폴백 경로로 동작하므로
+샌드박스/개발 PC에서 측정한 값은 참고용일 뿐이며, 실제 Jetson Nano
+TensorRT FP16 엔진 빌드 후 재측정이 필요하다.
 
 측정 항목:
   - 전처리 (DBSCAN + 정규화) 지연시간
