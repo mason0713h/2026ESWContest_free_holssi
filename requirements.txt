@@ -1,0 +1,66 @@
+# ============================================================
+# Fall Guardian - Python 의존성
+# ============================================================
+# 설치: pip install -r requirements.txt
+#
+# Jetson Orin Nano Super 환경:
+#   - JetPack 6.x (CUDA 12.2, cuDNN 9.x 포함)
+#   - TensorRT 10.x (JetPack에 포함)
+#   - pycuda는 아래 주석 참고
+# ============================================================
+
+# ── 핵심 의존성 ─────────────────────────────────
+
+# PyTorch (Jetson용은 NVIDIA 제공 wheel 사용)
+# https://developer.nvidia.com/embedded/jetson-software
+# pip install torch torchvision --index-url <NVIDIA Jetson 인덱스>
+torch>=2.1.0
+torchvision>=0.16.0
+
+# 과학 계산
+numpy>=1.24.0
+scipy>=1.10.0
+scikit-learn>=1.3.0        # DBSCAN
+
+# ── 레이더 통신 ─────────────────────────────────
+pyserial>=3.5              # UART 시리얼 통신
+
+# ── 설정 파일 ───────────────────────────────────
+PyYAML>=6.0
+
+# ── 알림 시스템 ─────────────────────────────────
+paho-mqtt>=1.6.1           # MQTT 클라이언트
+aiohttp>=3.9.0             # 비동기 HTTP (119 웹훅)
+twilio>=8.0.0              # SMS 발송 (Twilio API)
+
+# ── 음성 확인 ───────────────────────────────────
+pyttsx3>=2.90              # 오프라인 TTS
+openai-whisper>=20231117   # 오프라인 STT (Whisper tiny)
+sounddevice>=0.4.6         # 마이크 입력
+# espeak-ng: sudo apt-get install espeak-ng (시스템 패키지)
+
+# ── 학습 / 평가 ─────────────────────────────────
+tensorboard>=2.14.0        # 학습 로그 시각화
+onnx>=1.15.0               # ONNX 변환
+onnxruntime>=1.16.0        # ONNX 추론 (CPU 폴백)
+
+# ── TensorRT (Jetson 전용 설치) ────────────────
+# JetPack에 포함된 tensorrt와 pycuda 사용:
+#   sudo apt-get install python3-tensorrt
+#   pip install pycuda (또는 JetPack wheel)
+# 아래는 x86 개발 환경용:
+# tensorrt (nvidia-tensorrt 패키지 - x86 CUDA 환경)
+# pycuda>=2022.2
+
+# ── 시각화 (선택) ───────────────────────────────
+matplotlib>=3.7.0          # 포인트클라우드 시각화
+Pillow>=10.0.0             # GIF 생성
+
+# ── 테스트 ──────────────────────────────────────
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# ── 개발 도구 (선택) ────────────────────────────
+# black>=23.0.0            # 코드 포매터
+# isort>=5.12.0            # import 정렬
+# mypy>=1.5.0              # 타입 체크

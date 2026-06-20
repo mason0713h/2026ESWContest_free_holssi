@@ -1,0 +1,140 @@
+# ============================================================
+# Fall Guardian 설정 파일
+# TI IWR6843ISK-ODS 4D mmWave 레이더 기반 낙상 감지 시스템
+# ============================================================
+
+radar:
+  # 시리얼 포트 설정
+  config_port: "/dev/ttyUSB0"       # CLI 설정 포트
+  data_port: "/dev/ttyUSB1"         # 데이터 포트
+  config_baudrate: 115200
+  data_baudrate: 921600
+
+  # 레이더 파라미터
+  frequency_ghz: 60
+  range_resolution_m: 0.044
+  max_range_m: 5.0
+  velocity_resolution_mps: 0.13
+  max_velocity_mps: 3.0
+  azimuth_fov_deg: 120
+  elevation_fov_deg: 40
+
+  # 프레임 설정
+  frame_rate_hz: 10
+  window_size: 16          # 슬라이딩 윈도우 크기 (프레임)
+  stride: 8                # 슬라이딩 윈도우 스트라이드
+
+  # TLV 파싱
+  magic_word: [2, 1, 4, 3, 6, 5, 8, 7]
+  enhanced_point_cloud_tlv: 1006
+
+  # Mock 모드 (실제 하드웨어 없이 테스트)
+  mock_mode: false
+  mock_data_path: "data/mock/"
+
+preprocessing:
+  # DBSCAN 설정
+  dbscan_eps: 0.3
+  dbscan_min_samples: 3
+
+  # 포인트 수 정규화
+  target_points: 64
+
+  # 정규화 범위
+  x_range: [-3.0, 3.0]      # 방 가로 범위 (m)
+  y_range: [0.0, 5.0]       # 방 깊이 범위 (m)
+  z_range: [-0.5, 2.5]      # 방 높이 범위 (m)
+  vmax: 3.0                  # 최대 속도 (m/s)
+
+  # 오버샘플링 지터
+  jitter_std: 0.02           # 오버샘플링 시 노이즈 표준편차
+
+model:
+  # PointNet 설정
+  pointnet_features: 1024
+  pointnet_mlp1: [64, 64]
+  pointnet_mlp2: [128, 1024]
+
+  # GRU 설정
+  gru_hidden_size: 256
+  gru_num_layers: 2
+  gru_dropout: 0.3
+
+  # MLP 분류기 설정
+  mlp_hidden: [128, 64]
+  num_classes: 2             # 0: 정상, 1: 낙상
+
+  # 추론 설정
+  fall_threshold: 0.7        # 낙상 판정 확률 임계값
+  consecutive_frames: 3      # 연속 n 프레임 낙상 감지 시 알림
+
+  # 모델 경로
+  onnx_path: "model/weights/fall_guardian.onnx"
+  trt_path: "model/weights/fall_guardian.trt"
+  checkpoint_path: "model/weights/best_checkpoint.pth"
+
+long_lie:
+  # 장시간 쓰러짐 감지 설정
+  z_floor_threshold: 0.3     # 바닥 높이 기준 (m)
+  level1_seconds: 30         # 1단계 알림 (초)
+  level2_seconds: 60         # 2단계 알림 (초)
+  level3_seconds: 120        # 3단계 알림 (초)
+
+tracking:
+  # 다중 인원 추적 설정
+  max_persons: 5
+  track_timeout_seconds: 5.0
+  min_track_frames: 3
+  iou_threshold: 0.3
+  kalman_process_noise: 0.1
+  kalman_measurement_noise: 0.5
+
+mqtt:
+  broker_host: "localhost"
+  broker_port: 1883
+  keepalive: 60
+  client_id: "fall_guardian_001"
+
+  # 토픽 설정
+  topic_fall_detected: "fall_guardian/fall/detected"
+  topic_fall_confirmed: "fall_guardian/fall/confirmed"
+  topic_all_clear: "fall_guardian/status/clear"
+  topic_heartbeat: "fall_guardian/status/heartbeat"
+  topic_long_lie: "fall_guardian/fall/long_lie"
+
+  # QoS
+  qos: 1
+  retain: false
+
+  # 인증 (필요시)
+  username: ""
+  password: ""
+  use_tls: false
+
+alert:
+  # 음성 확인 설정
+  voice_response_timeout: 30      # 음성 응답 대기 시간 (초)
+  voice_confirm_keywords: ["괜찮", "괜찮아", "네", "아니요"]
+  tts_language: "ko"
+  stt_language: "ko-KR"
+  stt_model: "tiny"               # Whisper 모델 크기
+
+  # SMS 설정 (Twilio)
+  twilio_account_sid: ""          # 환경변수 TWILIO_ACCOUNT_SID 사용 권장
+  twilio_auth_token: ""           # 환경변수 TWILIO_AUTH_TOKEN 사용 권장
+  twilio_from_number: ""
+  guardian_phone: ""              # 보호자 전화번호
+
+  # 119 웹훅 (개념실증)
+  emergency_webhook_url: "https://example-emergency-gateway.kr/api/alert"
+  emergency_webhook_secret: ""
+
+  # 알림 쿨다운 (동일 대상 중복 알림 방지)
+  alert_cooldown_seconds: 300
+
+logging:
+  level: "INFO"
+  file: "logs/fall_guardian.log"
+  max_bytes: 10485760          # 10MB
+  backup_count: 5
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
