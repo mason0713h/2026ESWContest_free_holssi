@@ -19,19 +19,28 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import threading
 import time
 from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# TTS 가용성 확인
+# espeak-ng 가용성 확인 (한국어 TTS 1순위 — pyttsx3는 Linux에서 음성팩이
+# 등록돼 있어도 한국어 음성을 찾지 못한 채 예외 없이 영어로 발화하는
+# 경우가 많아 신뢰할 수 없다. espeak-ng -v ko 직접 호출이 더 안정적이다.)
+ESPEAK_NG_PATH = shutil.which("espeak-ng")
+ESPEAK_AVAILABLE = ESPEAK_NG_PATH is not None
+if not ESPEAK_AVAILABLE:
+    logger.warning("espeak-ng 미설치 (sudo apt-get install espeak-ng). pyttsx3로 폴백")
+
+# TTS 가용성 확인 (espeak-ng 없을 때의 2차 폴백)
 try:
     import pyttsx3  # type: ignore
     TTS_AVAILABLE = True
 except ImportError:
     TTS_AVAILABLE = False
-    logger.warning("pyttsx3 미설치. espeak 폴백 또는 Mock TTS 사용")
+    logger.warning("pyttsx3 미설치. Mock TTS만 사용 가능")
 
 # STT 가용성 확인
 try:
@@ -120,24 +129,34 @@ class VoiceConfirmation:
         )
 
     def _init_tts(self) -> None:
-        """TTS 엔진 초기화."""
+        """TTS 엔진 초기화. espeak-ng(한국어 직접 지원)를 1순위로 사용한다."""
+        if ESPEAK_AVAILABLE:
+            logger.info("espeak-ng 한국어 TTS 사용 (%s)", ESPEAK_NG_PATH)
+            return
+
         if TTS_AVAILABLE:
             try:
                 self._tts_engine = pyttsx3.init()
-                # 한국어 음성 설정 (사용 가능한 경우)
                 voices = self._tts_engine.getProperty("voices")
-                for v in voices:
-                    if "korean" in v.name.lower() or "ko" in v.id.lower():
-                        self._tts_engine.setProperty("voice", v.id)
-                        break
-                self._tts_engine.setProperty("rate", 150)  # 발화 속도
+                korean_voice = next(
+                    (v for v in voices if "ko" in v.id.lower() or "korean" in v.name.lower()),
+                    None,
+                )
+                if korean_voice is not None:
+                    self._tts_engine.setProperty("voice", korean_voice.id)
+                else:
+                    logger.warning(
+                        "pyttsx3에서 한국어 음성을 찾지 못함. 영어/기본 음성으로 발화될 수 있음 "
+                        "(espeak-ng 설치 권장: sudo apt-get install espeak-ng)"
+                    )
+                self._tts_engine.setProperty("rate", 150)
                 self._tts_engine.setProperty("volume", 0.9)
                 logger.info("pyttsx3 TTS 초기화 완료")
             except Exception as e:
-                logger.warning("pyttsx3 초기화 실패: %s. espeak 폴백 시도", e)
+                logger.warning("pyttsx3 초기화 실패: %s", e)
                 self._tts_engine = None
         else:
-            logger.info("espeak 폴백 TTS 사용")
+            logger.warning("TTS 엔진 없음 (espeak-ng, pyttsx3 모두 미설치)")
 
     def _init_stt(self, model_size: str) -> None:
         """Whisper STT 모델 초기화."""
@@ -164,24 +183,26 @@ class VoiceConfirmation:
             return
 
         with self._tts_lock:
+            if ESPEAK_AVAILABLE:
+                try:
+                    import subprocess
+                    subprocess.run(
+                        [ESPEAK_NG_PATH, "-v", "ko", "-s", "140", text],
+                        timeout=10,
+                        capture_output=True,
+                        check=False,
+                    )
+                    return
+                except Exception as e:
+                    logger.warning("espeak-ng 발화 오류: %s", e)
+
+            # pyttsx3 폴백 (한국어 음성이 없으면 영어로 발화될 수 있음)
             if self._tts_engine is not None:
                 try:
                     self._tts_engine.say(text)
                     self._tts_engine.runAndWait()
-                    return
                 except Exception as e:
                     logger.warning("pyttsx3 발화 오류: %s", e)
-
-            # espeak 폴백
-            try:
-                import subprocess
-                subprocess.run(
-                    ["espeak-ng", "-v", "ko", "-s", "140", text],
-                    timeout=10,
-                    capture_output=True,
-                )
-            except (FileNotFoundError, Exception) as e:
-                logger.warning("espeak 발화 오류: %s", e)
 
     def record_audio(self) -> Optional[object]:
         """

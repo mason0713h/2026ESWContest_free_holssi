@@ -72,8 +72,13 @@ sudo apt-get install -y \
     libffi-dev zlib1g-dev liblzma-dev \
     libopenblas-dev libopenmpi-dev \
     espeak-ng ffmpeg portaudio19-dev \
+    llvm-10 llvm-10-dev \
     python3-tensorrt \
     cmake git wget
+
+# openai-whisper가 의존하는 numba/llvmlite는 aarch64에서 pip wheel이 없어
+# 소스 빌드되며, llvmlite가 찾는 llvm-config 경로를 명시해야 빌드된다.
+export LLVM_CONFIG="$(command -v llvm-config-10 || true)"
 
 # ── 4. Python 3.8 소스 빌드 ──────────────────────
 log "4/7 Python ${PYTHON_VERSION} 빌드 확인"
