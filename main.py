@@ -129,9 +129,12 @@ class FallGuardianPipeline:
         self.capture = RadarCapture(
             config_port=radar_cfg.get("config_port", "/dev/ttyUSB0"),
             data_port=radar_cfg.get("data_port", "/dev/ttyUSB1"),
+            config_baudrate=radar_cfg.get("config_baudrate", 115200),
+            data_baudrate=radar_cfg.get("data_baudrate", 921600),
             window_size=radar_cfg.get("window_size", 16),
             stride=radar_cfg.get("stride", 8),
             mock_mode=mock_mode or radar_cfg.get("mock_mode", False),
+            cfg_file=radar_cfg.get("cfg_file"),
         )
 
         # 전처리기
@@ -338,8 +341,11 @@ class FallGuardianPipeline:
                 )
         else:
             for person in active_persons:
-                # 인원별 포인트로 재전처리 (가용 히스토리 사용)
-                person_tensor = tensor  # 단순화: 전체 씬 텐서 사용
+                # 인원별로 DBSCAN 분리된 포인트 히스토리를 독립적으로 전처리
+                history = self.tracker.get_person_window(person.person_id) or []
+                person_tensor = self.preprocessor.process_person_history(
+                    history, window_size=tensor.shape[0]
+                )
                 fall_detected, fall_prob = self._infer(person_tensor)
 
                 # 오경보 억제: 연속 3 프레임 낙상 감지 시만 인정
@@ -347,8 +353,8 @@ class FallGuardianPipeline:
                     person.person_id, fall_detected, fall_prob
                 )
 
-                # 4. Long-lie 업데이트
-                person_pts = latest_pc.points  # 실제로는 person별 분리 포인트
+                # 4. Long-lie 업데이트 (해당 인원의 최신 분리 포인트 사용)
+                person_pts = history[-1] if history else np.zeros((0, 6), dtype=np.float32)
                 alert_level = self.long_lie.update(
                     person_id=person.person_id,
                     fall_detected=fall_detected and fall_prob >= 0.7,
@@ -369,6 +375,9 @@ class FallGuardianPipeline:
         """파이프라인 메인 루프 실행."""
         self._running = True
         self._stats["start_time"] = time.time()
+
+        # 레이더 시리얼 포트 연결 및 .cfg 전송 (mock 모드에서는 내부에서 스킵됨)
+        self.capture.connect()
 
         # MQTT 연결
         if not self.mqtt_publisher.connect():
@@ -392,6 +401,7 @@ class FallGuardianPipeline:
         finally:
             heartbeat_task.cancel()
             self.capture.stop()
+            self.capture.disconnect()
             self.mqtt_publisher.disconnect()
             self._print_stats()
 

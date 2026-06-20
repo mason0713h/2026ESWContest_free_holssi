@@ -1,0 +1,20 @@
+[Unit]
+Description=Fall Guardian - 4D mmWave 낙상 감지 시스템
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 아래 User/WorkingDirectory/ExecStart 경로를 실제 설치 경로/사용자에 맞게 수정할 것.
+User=jetson
+WorkingDirectory=/home/jetson/fall_guardian
+ExecStart=/home/jetson/fall_guardian/.venv/bin/python main.py --config config/config.yaml
+Restart=on-failure
+RestartSec=5
+# Jetson Nano는 USB 시리얼 장치(/dev/ttyUSB0,1)가 핫플러그될 수 있으므로
+# 장치가 늦게 잡혀도 재시도하도록 RestartSec을 짧게 둔다.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

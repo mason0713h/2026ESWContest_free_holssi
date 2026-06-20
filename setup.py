@@ -16,7 +16,9 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Fall Guardian Team",
-    python_requires=">=3.10",
+    # Jetson Orin Nano(JetPack 6.x)는 Python 3.10+, 구형 Jetson Nano(JetPack
+    # 4.6.x)는 소스 빌드한 Python 3.8을 사용한다 (scripts/setup_jetson_nano.sh).
+    python_requires=">=3.8",
     packages=find_packages(
         exclude=["tests*", "scripts*", "data*", "logs*"]
     ),
