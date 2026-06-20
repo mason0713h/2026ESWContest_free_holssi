@@ -309,6 +309,7 @@ class TRTInferenceEngine:
                 proba = self._softmax(output[0])
                 fall_prob = float(proba[1])
                 elapsed_ms = (time.perf_counter() - t0) * 1000
+                self._latency_history.append(elapsed_ms)
                 return fall_prob >= self.fall_threshold, fall_prob, elapsed_ms
             except Exception as e:
                 logger.debug("ONNX Runtime 폴백 실패: %s", e)
@@ -316,6 +317,7 @@ class TRTInferenceEngine:
         # 최종 폴백: 랜덤 (Mock 테스트용)
         elapsed_ms = (time.perf_counter() - t0) * 1000 + np.random.uniform(5, 15)
         fall_prob = float(np.random.uniform(0.0, 0.3))  # 대부분 낙상 없음
+        self._latency_history.append(elapsed_ms)
         return fall_prob >= self.fall_threshold, fall_prob, elapsed_ms
 
     @staticmethod
